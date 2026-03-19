@@ -84,6 +84,51 @@ const presets = [
     }
 ];
 
+// --- Ambient Sound Options ---
+// --- Ambient Sound Options ---
+const ambientTracks = [
+    { 
+        id: 'none', 
+        label: 'No Background', 
+        file: null,
+        icon: (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+        )
+    },
+    { 
+        id: 'rain', 
+        label: 'Rain', 
+        file: '/audio/rain.mp3',
+        icon: (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 14.5a4.5 4.5 0 00-4-4.43V10a5 5 0 00-10 0v.07A4.5 4.5 0 006 19h11a4.5 4.5 0 002-4.5zM12 21v-3m-4 3v-3m8 3v-3" />
+            </svg>
+        )
+    },
+    { 
+        id: 'wind', 
+        label: 'Ocean Waves', 
+        file: '/audio/ocean.mp3',
+        icon: (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 15c3 0 3-3 6-3s3 3 6 3 3-3 6-3v2c-3 0-3 3-6 3s-3-3-6-3-3 3-6 3v-2zm0 4c3 0 3-3 6-3s3 3 6 3 3-3 6-3v2c-3 0-3 3-6 3s-3-3-6-3-3 3-6 3v-2z" />
+            </svg>
+        )
+    },
+    { 
+        id: 'brown', 
+        label: 'Chirping Birds', 
+        file: '/audio/birds.mp3',
+        icon: (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+        )
+    }
+];
+
 // --- Formatted Time Helper ---
 const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60);
@@ -143,6 +188,10 @@ const BinauralBeatPlayer = ({ activePreset, onBack, onPresetChange }) => {
     const [volume, setVolume] = useState(0.5);
     const [timerMinutes, setTimerMinutes] = useState(0);
     const [remainingSeconds, setRemainingSeconds] = useState(0);
+
+    const [selectedAmbient, setSelectedAmbient] = useState(ambientTracks[0]);
+    const [ambientVolume, setAmbientVolume] = useState(0.3); // Default to 30% volume
+    const ambientAudioRef = useRef(null);
 
     // Audio Refs
     const audioContextRef = useRef(null);
@@ -223,7 +272,17 @@ const BinauralBeatPlayer = ({ activePreset, onBack, onPresetChange }) => {
         if (timerMinutes > 0) {
             setRemainingSeconds(timerMinutes * 60);
         }
-    }, [baseFrequency, binauralFrequency, volume, timerMinutes, initializeAudio]);
+
+        
+        // NEW: Play ambient audio if one is selected
+        if (ambientAudioRef.current && selectedAmbient.file) {
+            ambientAudioRef.current.play().catch(e => console.warn("Audio autoplay blocked", e));
+        }
+        
+        if (timerMinutes > 0) {
+            setRemainingSeconds(timerMinutes * 60);
+        }
+    }, [baseFrequency, binauralFrequency, volume, timerMinutes, selectedAmbient, initializeAudio]);
 
     const stop = useCallback(() => {
         if (leftChannelRef.current) leftChannelRef.current.stop();
@@ -232,6 +291,10 @@ const BinauralBeatPlayer = ({ activePreset, onBack, onPresetChange }) => {
         rightChannelRef.current = null;
         setIsPlaying(false);
         setRemainingSeconds(0);
+
+        if (ambientAudioRef.current) {
+            ambientAudioRef.current.pause();
+        }
     }, []);
 
     const togglePlay = () => isPlaying ? stop() : play();
@@ -254,21 +317,52 @@ const BinauralBeatPlayer = ({ activePreset, onBack, onPresetChange }) => {
     }, [volume]);
 
     // Sleep Timer Countdown
+    // Effect: Sleep Timer Countdown & Fade Out
     useEffect(() => {
         let interval;
+        const FADE_SECONDS = 10; // Start the fade-out 10 seconds before stopping
+
         if (isPlaying && timerMinutes > 0 && remainingSeconds > 0) {
             interval = setInterval(() => {
                 setRemainingSeconds(prev => {
-                    if (prev <= 1) {
+                    const nextSec = prev - 1;
+
+                    // --- THE FADE OUT LOGIC ---
+                    if (nextSec === FADE_SECONDS) {
+                        
+                        // 1. Fade the Binaural Beat (Web Audio API)
+                        if (masterGainRef.current && audioContextRef.current) {
+                            const currentTime = audioContextRef.current.currentTime;
+                            // Anchor the current volume, then ramp down to 0 over 10 seconds
+                            masterGainRef.current.gain.setValueAtTime(masterGainRef.current.gain.value, currentTime);
+                            masterGainRef.current.gain.linearRampToValueAtTime(0.001, currentTime + FADE_SECONDS);
+                        }
+                    }
+
+                    // 2. Fade the Ambient Background (HTML5 Audio)
+                    // We step the volume down incrementally during the last 10 seconds
+                    if (nextSec <= FADE_SECONDS && nextSec > 0) {
+                        if (ambientAudioRef.current) {
+                            // Calculate how much to drop the volume each second
+                            const stepDown = ambientVolume / FADE_SECONDS;
+                            // Ensure it doesn't drop below 0 to prevent errors
+                            const newVol = Math.max(0, ambientAudioRef.current.volume - stepDown);
+                            ambientAudioRef.current.volume = newVol;
+                        }
+                    }
+
+                    // --- STOP LOGIC ---
+                    if (nextSec <= 0) {
                         stop(); 
                         return 0;
                     }
-                    return prev - 1;
+                    return nextSec;
                 });
-            }, 1000);
+            }, 1000); // Runs once every second
         }
+        
         return () => clearInterval(interval);
-    }, [isPlaying, timerMinutes, remainingSeconds, stop]);
+    }, [isPlaying, timerMinutes, remainingSeconds, ambientVolume, stop]);
 
     // Cleanup Effect
     useEffect(() => {
@@ -346,6 +440,37 @@ const BinauralBeatPlayer = ({ activePreset, onBack, onPresetChange }) => {
         };
     }, [isPlaying, activePreset]);
 
+    // Effect: Handle Ambient Track Changes
+    useEffect(() => {
+        if (selectedAmbient.file) {
+            if (!ambientAudioRef.current) {
+                ambientAudioRef.current = new Audio(selectedAmbient.file);
+                ambientAudioRef.current.loop = true; // Make sure it loops endlessly!
+            } else {
+                ambientAudioRef.current.src = selectedAmbient.file;
+            }
+            
+            ambientAudioRef.current.volume = ambientVolume;
+            
+            // If the session is already running, start playing the new track immediately
+            if (isPlaying) {
+                ambientAudioRef.current.play().catch(e => console.warn(e));
+            }
+        } else {
+            // If "None" is selected, pause and clear
+            if (ambientAudioRef.current) {
+                ambientAudioRef.current.pause();
+            }
+        }
+    }, [selectedAmbient]);
+
+    // Effect: Handle Ambient Volume Slider
+    useEffect(() => {
+        if (ambientAudioRef.current) {
+            ambientAudioRef.current.volume = ambientVolume;
+        }
+    }, [ambientVolume]);
+
     return (
         <div className="relative z-10 flex items-center justify-center min-h-screen p-4 overflow-hidden">
             <canvas ref={canvasRef} className="absolute inset-0 w-full h-full -z-10"></canvas>
@@ -404,13 +529,39 @@ const BinauralBeatPlayer = ({ activePreset, onBack, onPresetChange }) => {
                     </div>
 
                     {/* Environment Controls */}
-                    <div className="flex flex-col justify-between gap-6 bg-gray-800 bg-opacity-40 p-6 rounded-2xl border border-gray-700">
+                    {/* Environment Controls */}
+                    <div className="flex flex-col gap-6 bg-gray-800 bg-opacity-40 p-6 rounded-2xl border border-gray-700">
+                        
+                        {/* Master & Ambient Volume */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="w-full">
+                                <label className="text-sm font-semibold text-gray-400 uppercase tracking-wider block mb-3">Beat Volume</label>
+                                <input type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-white" />
+                            </div>
+                            <div className="w-full">
+                                <label className="text-sm font-semibold text-gray-400 uppercase tracking-wider block mb-3">Ambience Vol</label>
+                                <input type="range" min="0" max="1" step="0.01" value={ambientVolume} onChange={(e) => setAmbientVolume(parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-white" disabled={!selectedAmbient.file} />
+                            </div>
+                        </div>
+
+                        {/* Ambient Sound Selector */}
                         <div className="w-full">
-                            <label className="text-sm font-semibold text-gray-400 uppercase tracking-wider block mb-3">Volume</label>
-                            <input type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-white" />
-                            <span className="mt-2 text-gray-300 font-mono text-sm block text-right">{Math.round(volume * 100)}%</span>
+                            <label className="text-sm font-semibold text-gray-400 uppercase tracking-wider block mb-3 text-center md:text-left">Background Sound</label>
+                            <div className="flex justify-between md:justify-start gap-3">
+                                {ambientTracks.map(track => (
+                                    <button 
+                                        key={track.id}
+                                        title={track.label}
+                                        onClick={() => setSelectedAmbient(track)}
+                                        className={`p-3 rounded-xl flex items-center justify-center transition-all duration-300 ${selectedAmbient.id === track.id ? 'bg-white text-gray-900 shadow-lg shadow-white/20 scale-105' : 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-white'}`}
+                                    >
+                                        {track.icon}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                         
+                        {/* Sleep Timer */}
                         <div className="w-full">
                             <label className="text-sm font-semibold text-gray-400 uppercase tracking-wider block mb-3 text-center md:text-left">Sleep Timer</label>
                             <div className="flex justify-between gap-2">
