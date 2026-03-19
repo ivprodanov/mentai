@@ -1,7 +1,7 @@
-/* #root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+html, body {
+  background-color: #030712; /* This is Tailwind's gray-950 */
+  color: white;
+  
+  /* Optional: This completely stops the "bounce" effect when scrolling past the top/bottom on Mac and iOS */
+  overscroll-behavior: none; 
 }
- */
